@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Label, TankerEntry } from '../types';
+import { addDieselToMonth, addKilometersDriven, getMonthlyData } from '../lib/monthlyFuelTracking';
 
 interface TankerFormEntry {
   id?: string;
@@ -256,43 +257,55 @@ const DayEntries: React.FC = () => {
   };
 
   const updateCurrentRange = async () => {
-    if (!label || !labelId || !user) return;
+    if (!label || !labelId || !user || !year || !month) return;
 
     try {
-      const { data: allEntries, error: fetchError } = await supabase
+      const monthNum = parseInt(month);
+      const yearNum = parseInt(year);
+
+      const startDate = `${year}-${month}-01`;
+      const lastDay = new Date(yearNum, monthNum, 0).getDate();
+      const endDate = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+
+      const { data: allEntriesInMonth, error: fetchError } = await supabase
         .from('tanker_entries')
         .select('*')
         .eq('label_id', labelId)
         .eq('user_id', user.id)
-        .order('date', { ascending: true })
-        .order('time', { ascending: true });
+        .gte('date', startDate)
+        .lte('date', endDate);
 
       if (fetchError) throw fetchError;
 
-      let currentRange = 0;
-      const dieselAverage = label.diesel_average || 0;
+      let totalDieselAdded = 0;
+      let totalKmDriven = 0;
 
-      (allEntries || []).forEach(entry => {
-        const dieselAdded = entry.diesel_added || 0;
-        const kmDriven = entry.total_km || 0;
-
-        const addedRange = dieselAdded * dieselAverage;
-        currentRange += addedRange - kmDriven;
+      (allEntriesInMonth || []).forEach(entry => {
+        totalDieselAdded += entry.diesel_added || 0;
+        totalKmDriven += entry.total_km || 0;
       });
 
-      currentRange = Math.max(0, currentRange);
+      const monthlyData = await getMonthlyData(user.id, labelId, monthNum, yearNum);
 
-      const { error: updateError } = await supabase
-        .from('labels')
-        .update({ current_range: currentRange })
-        .eq('id', labelId)
-        .eq('user_id', user.id);
+      if (monthlyData) {
+        const dieselAverage = monthlyData.diesel_average || 0;
+        const carriedRange = monthlyData.carried_range || 0;
 
-      if (updateError) throw updateError;
+        const addedRange = totalDieselAdded * dieselAverage;
+        const remainingRange = Math.max(0, carriedRange + addedRange - totalKmDriven);
 
-      setLabel(prev => prev ? { ...prev, current_range: currentRange } : null);
+        await supabase
+          .from('monthly_fuel_data')
+          .update({
+            total_diesel_added: totalDieselAdded,
+            total_km_driven: totalKmDriven,
+            remaining_range: remainingRange,
+            is_average_locked: totalDieselAdded > 0
+          })
+          .eq('id', monthlyData.id);
+      }
     } catch (error: any) {
-      console.error('Failed to update current range:', error.message);
+      console.error('Failed to update monthly range:', error.message);
     }
   };
 
