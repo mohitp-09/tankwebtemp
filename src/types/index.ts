@@ -53,19 +53,3 @@ export interface MonthlyData {
   totalAbsentCount: number;
   totalDieselAdded: number;
 }
-
-export interface MonthlyFuelData {
-  id: string;
-  user_id: string;
-  label_id: string;
-  month: number;
-  year: number;
-  diesel_average: number;
-  carried_range: number;
-  total_diesel_added: number;
-  total_km_driven: number;
-  remaining_range: number;
-  is_average_locked: boolean;
-  created_at: string;
-  updated_at: string;
-}

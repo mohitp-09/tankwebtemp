@@ -8,7 +8,6 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { Label, TankerEntry } from '../types';
 import AddAverageModal from '../components/AddAverageModal';
-import { getOrCreateMonthlyData, getMonthlyData, updateMonthlyAverage } from '../lib/monthlyFuelTracking';
 
 const LabelView: React.FC = () => {
   const { labelId } = useParams<{ labelId: string }>();
@@ -19,9 +18,6 @@ const LabelView: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [totalTankers, setTotalTankers] = useState(0);
   const [isAverageModalOpen, setIsAverageModalOpen] = useState(false);
-  const [currentMonthAverage, setCurrentMonthAverage] = useState(0);
-  const [currentMonthRange, setCurrentMonthRange] = useState(0);
-  const [isAverageLocked, setIsAverageLocked] = useState(false);
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -34,20 +30,8 @@ const LabelView: React.FC = () => {
     if (user && labelId) {
       fetchLabel();
       fetchEntriesForMonth();
-      fetchMonthlyFuelData();
     }
   }, [user, labelId, month, year]);
-
-  const fetchMonthlyFuelData = async () => {
-    if (!user || !labelId) return;
-
-    const monthlyData = await getOrCreateMonthlyData(user.id, labelId, month, year);
-    if (monthlyData) {
-      setCurrentMonthAverage(monthlyData.diesel_average);
-      setCurrentMonthRange(monthlyData.remaining_range);
-      setIsAverageLocked(monthlyData.is_average_locked);
-    }
-  };
 
   const fetchLabel = async () => {
     try {
@@ -76,22 +60,17 @@ const LabelView: React.FC = () => {
   };
 
   const handleSaveAverage = async (average: number) => {
-    if (!user || !labelId) return;
-
-    if (isAverageLocked) {
-      toast.error('Cannot change average after diesel has been added this month');
-      return;
-    }
-
     try {
-      const success = await updateMonthlyAverage(user.id, labelId, month, year, average);
+      const { error } = await supabase
+        .from('labels')
+        .update({ diesel_average: average })
+        .eq('id', labelId)
+        .eq('user_id', user?.id);
 
-      if (success) {
-        setCurrentMonthAverage(average);
-        toast.success('Diesel average updated successfully for this month');
-      } else {
-        throw new Error('Failed to update average');
-      }
+      if (error) throw error;
+
+      setLabel(prev => prev ? { ...prev, diesel_average: average } : null);
+      toast.success('Diesel average updated successfully');
     } catch (error: any) {
       toast.error('Failed to update diesel average: ' + error.message);
     }
@@ -276,17 +255,14 @@ const LabelView: React.FC = () => {
                     <Fuel className="h-5 w-5 text-green-600" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-gray-600">Current Range ({format(currentDate, 'MMM yyyy')})</p>
-                    <p className="text-2xl font-bold text-green-700">{currentMonthRange?.toFixed(2) || '0.00'} km</p>
+                    <p className="text-sm font-medium text-gray-600">Current Range</p>
+                    <p className="text-2xl font-bold text-green-700">{label?.current_range?.toFixed(2) || '0.00'} km</p>
                   </div>
                 </div>
-                {currentMonthAverage > 0 && (
+                {label?.diesel_average > 0 && (
                   <div className="text-right">
-                    <p className="text-xs text-gray-500">Average (This Month)</p>
-                    <p className="text-sm font-semibold text-gray-700">{currentMonthAverage} km/l</p>
-                    {isAverageLocked && (
-                      <p className="text-xs text-orange-600 mt-1">🔒 Locked</p>
-                    )}
+                    <p className="text-xs text-gray-500">Average</p>
+                    <p className="text-sm font-semibold text-gray-700">{label.diesel_average} km/l</p>
                   </div>
                 )}
               </div>
@@ -374,7 +350,7 @@ const LabelView: React.FC = () => {
         isOpen={isAverageModalOpen}
         onClose={() => setIsAverageModalOpen(false)}
         onSave={handleSaveAverage}
-        currentAverage={currentMonthAverage}
+        currentAverage={label?.diesel_average || 0}
       />
     </div>
   );
